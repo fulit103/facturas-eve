@@ -8,3 +8,8 @@ node_modules
 dist
 .DS_Store
 *.tsbuildinfo
+
+# The env template is documentation, not a secret.
+!.env.example
+.pnpm-store
+.atl

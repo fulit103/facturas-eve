@@ -11,10 +11,13 @@
     "deploy": "eve deploy",
     "dev": "eve dev",
     "eval": "eve eval",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "eve start",
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@llamaindex/llama-cloud": "2.16.0",
     "@vercel/connect": "2.2.0",
     "ai": "^7.0.105",
     "eve": "^0.59.0",
@@ -22,10 +25,11 @@
   },
   "devDependencies": {
     "@types/node": "24.x",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
   },
   "engines": {
     "node": "24.x"
-  }
-
+  },
+  "packageManager": "pnpm@11.3.0"
 }
