@@ -1,6 +1,6 @@
 import { telegramChannel } from "eve/channels/telegram";
 
-import { ALLOWED_MEDIA_TYPES, MAX_UPLOAD_BYTES } from "#lib/attachments.js";
+import { MAX_UPLOAD_BYTES } from "#lib/attachments.js";
 
 /**
  * Telegram surface for the invoice agent.
@@ -16,7 +16,9 @@ import { ALLOWED_MEDIA_TYPES, MAX_UPLOAD_BYTES } from "#lib/attachments.js";
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME,
   uploadPolicy: {
-    allowedMediaTypes: [...ALLOWED_MEDIA_TYPES],
+    // Telegram often returns application/octet-stream after getFile even for PDFs.
+    // Strict validation happens later in attachments.ts via magic bytes.
+    allowedMediaTypes: ["application/*", "image/jpeg", "image/png"],
     maxBytes: MAX_UPLOAD_BYTES,
   },
 });

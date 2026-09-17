@@ -42,6 +42,14 @@ describe("validateAttachment", () => {
     );
   });
 
+  it("accepts a valid PDF when transport mislabels content as octet-stream", () => {
+    // Telegram may download PDFs with Content-Type application/octet-stream.
+    // attachments.ts validates by extension and magic bytes, not declared MIME.
+    expect(validateAttachment({ bytes: PDF_BYTES, fileName: "comprobanteTigoUne.pdf" })).toBe(
+      "application/pdf",
+    );
+  });
+
   it("accepts jpg, jpeg and png", () => {
     expect(validateAttachment({ bytes: JPEG_BYTES, fileName: "factura.jpg" })).toBe("image/jpeg");
     expect(validateAttachment({ bytes: JPEG_BYTES, fileName: "FACTURA.JPEG" })).toBe("image/jpeg");
