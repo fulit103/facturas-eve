@@ -4,3 +4,6 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/provider@4.0.17'
   - ai@7.0.105
   - eve@0.59.0
+
+allowBuilds:
+  sharp: false

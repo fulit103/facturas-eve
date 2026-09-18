@@ -116,18 +116,23 @@ export function validateAttachment(input: {
     );
   }
 
-  const extension = extensionOf(fileName);
-  const declared = EXTENSION_MEDIA_TYPES[extension];
-  if (declared === undefined) {
-    throw new AttachmentError(
-      `Solo acepto facturas en PDF, JPG o PNG. El archivo "${fileName}" no tiene un formato permitido.`,
-    );
-  }
-
   const actual = sniffMediaType(bytes);
   if (actual === null) {
     throw new AttachmentError(
       `El contenido de "${fileName}" no corresponde a un PDF, JPG o PNG válido.`,
+    );
+  }
+
+  const extension = extensionOf(fileName);
+  if (extension === "") {
+    // eve may stage web uploads as a content hash with no extension.
+    return actual;
+  }
+
+  const declared = EXTENSION_MEDIA_TYPES[extension];
+  if (declared === undefined) {
+    throw new AttachmentError(
+      `Solo acepto facturas en PDF, JPG o PNG. El archivo "${fileName}" no tiene un formato permitido.`,
     );
   }
   if (actual !== declared) {
@@ -157,12 +162,15 @@ export interface ResolvedAttachment {
 }
 
 /**
- * Lists staged attachments newest-first. Used when the model calls the tool
- * without naming a path, which happens when it refers to "this invoice".
+ * Lists the names of entries in a sandbox directory, newest-first.
  */
-export async function listStagedAttachments(sandbox: AttachmentSandbox): Promise<string[]> {
+export async function listDirectory(
+  sandbox: AttachmentSandbox,
+  directory: string,
+): Promise<string[]> {
+  const path = assertSafeAttachmentPath(directory);
   const result = await sandbox.run({
-    command: `ls -1t ${ATTACHMENTS_DIR} 2>/dev/null || true`,
+    command: `ls -1t ${JSON.stringify(path)} 2>/dev/null || true`,
   });
   if (result.exitCode !== 0) return [];
   return result.stdout
@@ -172,35 +180,93 @@ export async function listStagedAttachments(sandbox: AttachmentSandbox): Promise
 }
 
 /**
- * Reads a staged attachment and validates it. When `filePath` is omitted, the
- * most recently staged attachment is used.
+ * Lists staged attachments newest-first. Used when the model calls the tool
+ * without naming a path, which happens when it refers to "this invoice".
  */
+export async function listStagedAttachments(sandbox: AttachmentSandbox): Promise<string[]> {
+  return listDirectory(sandbox, ATTACHMENTS_DIR);
+}
+
+async function readBytes(sandbox: AttachmentSandbox, path: string): Promise<Uint8Array | null> {
+  try {
+    return (await sandbox.readBinaryFile({ path })) ?? null;
+  } catch {
+    // Directories and missing files surface as a thrown error or null.
+    return null;
+  }
+}
+
+/**
+ * Resolves a staged path to a readable file. eve web uploads land as
+ * `/workspace/attachments/<hash>/<original-name>`, so a hash or the attachments
+ * directory itself is treated as a container, not as the invoice.
+ */
+async function resolveReadableFilePath(
+  sandbox: AttachmentSandbox,
+  candidate: string,
+): Promise<string> {
+  const path = assertSafeAttachmentPath(candidate);
+  if (isAttachmentsDirectory(path)) {
+    return resolveNewestAttachmentPath(sandbox);
+  }
+
+  const bytes = await readBytes(sandbox, path);
+  if (bytes !== null) return path;
+
+  const children = await listDirectory(sandbox, path);
+  for (const child of children) {
+    const childPath = assertSafeAttachmentPath(`${path}/${child}`);
+    const childBytes = await readBytes(sandbox, childPath);
+    if (childBytes !== null) return childPath;
+  }
+
+  throw new AttachmentError(
+    `No pude leer el archivo adjunto en "${path}". Volvé a enviarlo, por favor.`,
+  );
+}
+
+async function resolveNewestAttachmentPath(sandbox: AttachmentSandbox): Promise<string> {
+  const entries = await listStagedAttachments(sandbox);
+  if (entries[0] === undefined) {
+    throw new AttachmentError(
+      "No encontré ningún archivo adjunto en esta conversación. Enviame la factura como PDF, JPG o PNG.",
+    );
+  }
+
+  const errors: string[] = [];
+  for (const entry of entries) {
+    try {
+      return await resolveReadableFilePath(sandbox, `${ATTACHMENTS_DIR}/${entry}`);
+    } catch (error) {
+      if (error instanceof AttachmentError) {
+        errors.push(error.userMessage);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new AttachmentError(
+    errors[0] ??
+      "No encontré ningún archivo adjunto en esta conversación. Enviame la factura como PDF, JPG o PNG.",
+  );
+}
+
+function isAttachmentsDirectory(path: string): boolean {
+  const normalized = path.replace(/\/+$/u, "");
+  return normalized === ATTACHMENTS_DIR;
+}
+
 export async function resolveAttachment(
   sandbox: AttachmentSandbox,
   filePath?: string,
 ): Promise<ResolvedAttachment> {
-  let path: string;
+  const path =
+    filePath !== undefined && filePath.trim() !== ""
+      ? await resolveReadableFilePath(sandbox, filePath)
+      : await resolveNewestAttachmentPath(sandbox);
 
-  if (filePath !== undefined && filePath.trim() !== "") {
-    path = assertSafeAttachmentPath(filePath);
-  } else {
-    const entries = await listStagedAttachments(sandbox);
-    const newest = entries[0];
-    if (newest === undefined) {
-      throw new AttachmentError(
-        "No encontré ningún archivo adjunto en esta conversación. Enviame la factura como PDF, JPG o PNG.",
-      );
-    }
-    path = assertSafeAttachmentPath(`${ATTACHMENTS_DIR}/${newest}`);
-  }
-
-  let bytes: Uint8Array | null;
-  try {
-    bytes = await sandbox.readBinaryFile({ path });
-  } catch {
-    // The underlying error can carry sandbox internals; keep it out of the reply.
-    bytes = null;
-  }
+  const bytes = await readBytes(sandbox, path);
   if (bytes === null) {
     throw new AttachmentError(
       `No pude leer el archivo adjunto en "${path}". Volvé a enviarlo, por favor.`,
