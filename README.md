@@ -19,11 +19,11 @@ Web Chat ──► app/ + /eve/v1/*             (Next.js + useEveAgent)
         ┌─────────────┴─────────────┐
         ▼                           ▼
   extract_invoice              save_invoice
-  LlamaParse ──► markdown      dedupe ──► Airtable
-  markdown  ──► InvoiceSchema
+  LlamaParse ──► markdown      dedupe ──► Airtable (fila)
+  markdown  ──► InvoiceSchema  bytes del sandbox ──► campo Attachment
 ```
 
-`extract_invoice` nunca escribe en Airtable y `save_invoice` nunca vuelve a leer el documento. Esa separación es deliberada: si Airtable falla, el agente reintenta solo el guardado sin pagar otra extracción.
+`extract_invoice` nunca escribe en Airtable. `save_invoice` no vuelve a parsear el documento: si Airtable falla, el agente reintenta solo el guardado sin pagar otra extracción. Sí lee los bytes del sandbox para subir el PDF/JPG/PNG original al campo `Attachment`.
 
 ### Sobre el SDK de LlamaIndex
 
@@ -161,6 +161,7 @@ Los nombres tienen que coincidir exactamente, respetando mayúsculas y espacios.
 | `Description` | Long text | |
 | `CUFE` | Single line text | Código de factura electrónica colombiana. |
 | `Source File` | Single line text | Nombre del archivo recibido. |
+| `Attachment` | Attachment | PDF, JPG o PNG original. La API acepta hasta 5 MB por archivo. |
 | `Telegram User ID` | Single line text | |
 | `Telegram Chat ID` | Single line text | |
 | `Created At` | Date (con hora) | Se guarda como ISO 8601. |
@@ -175,7 +176,7 @@ Telegram puede reenviar el mismo webhook, y vos podés reenviar el mismo archivo
 1. **`Idempotency Key`** — SHA-256 del contenido del archivo (`sha256:<hex>`). Los mismos bytes siempre dan la misma clave.
 2. **Proveedor + número de factura** — `Supplier Tax ID` + `Invoice Number`. Atrapa el caso de la misma factura escaneada dos veces, donde los bytes difieren.
 
-Si cualquiera de las dos encuentra un registro, la tool devuelve `duplicate: true` con el `recordId` existente y no crea una fila nueva.
+Si cualquiera de las dos encuentra un registro, la tool devuelve `duplicate: true` con el `recordId` existente y no crea una fila nueva. Si esa fila todavía no tiene archivo en `Attachment`, el reintento sube el PDF/JPG/PNG que coincida con el hash.
 
 > El `file_unique_id` de Telegram no se expone a las tools en el canal nativo de eve (los adjuntos llegan como archivos stageados en el sandbox), así que la clave primaria es el hash del contenido. Para este caso es más confiable: sobrevive a reenvíos desde cualquier chat.
 
@@ -247,7 +248,7 @@ Cobertura:
 | `tests/attachments.test.ts` | Rechazo de `.exe`, ejecutables disfrazados de `.pdf`, tamaño máximo y traversal de rutas. |
 | `tests/extract-invoice.test.ts` | Pipeline de extracción con parser mockeado. |
 | `tests/extract-invoice-tool.test.ts` | La tool `extract_invoice` con la librería mockeada. |
-| `tests/save-invoice.test.ts` | La tool `save_invoice` y el cliente de Airtable, incluyendo duplicados. |
+| `tests/save-invoice.test.ts` | La tool `save_invoice` y el cliente de Airtable, incluyendo duplicados y upload del adjunto. |
 | `tests/idempotency.test.ts` | Estabilidad de las claves de deduplicación. |
 
 ## Evals

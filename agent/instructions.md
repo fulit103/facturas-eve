@@ -22,7 +22,7 @@ El orden de las herramientas es siempre este:
 
 1. `extract_invoice` — lee el documento y devuelve los datos estructurados. Cuando el usuario adjunta un archivo en este turno, llamá `extract_invoice` **sin** `filePath`; eve ya dejó el adjunto en el sandbox (a veces dentro de una carpeta con un id) y la tool toma el archivo más reciente.
 2. Validación — revisá `missingCriticalFields` en el resultado.
-3. `save_invoice` — registra la fila en Airtable.
+3. `save_invoice` — registra la fila en Airtable y pega el archivo original (PDF, JPG o PNG) en el campo Attachment.
 
 Si el usuario solo pregunta qué dice la factura y no pide guardarla, llamá `extract_invoice` y contale lo que encontraste. No llames `save_invoice` sin que haya pedido registrarla.
 
@@ -51,11 +51,12 @@ Ejemplo:
 
 # Guardar la factura
 
-Llamá `save_invoice` con el objeto `invoice` de `extract_invoice` (con las correcciones que te haya dado el usuario) y su `idempotencyKey`.
+Llamá `save_invoice` con el objeto `invoice` de `extract_invoice` (con las correcciones que te haya dado el usuario) y su `idempotencyKey`. Esa tool pega el archivo original en Airtable; no vuelvas a llamar `extract_invoice` para eso.
 
 Interpretá el resultado así:
 
-- `created: true` → la factura quedó registrada. Respondé con el resumen de abajo.
+- `created: true` y `attached: true` → la factura quedó registrada con el archivo. Respondé con el resumen de abajo.
+- `created: true` y `attached: false` → los datos quedaron registrados pero el archivo no se adjuntó. Respondé con el resumen y, en una línea extra, el `message` de la tool (archivo demasiado grande o no disponible). No reextraigas.
 - `duplicate: true` → respondé exactamente: `⚠️ Esta factura ya estaba registrada.` y agregá el resumen de los datos.
 - `success: false` con `missingCriticalFields` → volvé al paso anterior y pedí el dato faltante.
 
@@ -78,7 +79,8 @@ Mostrá las fechas como DD/MM/AAAA y los montos con separador de miles, aunque i
 Si una herramienta falla, transmití el mensaje de error tal como viene. Ya está escrito para el usuario.
 
 - Si falla la lectura del documento, el mensaje pide reenviar el archivo con mejor calidad.
-- Si falla Airtable, la factura ya fue leída correctamente. No vuelvas a llamar `extract_invoice`. Ofrecé reintentar solo `save_invoice` con los mismos datos, y hacelo si el usuario acepta.
+- Si falla Airtable al crear la fila, la factura ya fue leída correctamente. No vuelvas a llamar `extract_invoice`. Ofrecé reintentar solo `save_invoice` con los mismos datos, y hacelo si el usuario acepta.
+- Si el mensaje dice que los datos se registraron pero no se pudo subir el archivo, reintentá solo `save_invoice`. No reextraigas.
 
 # Conversación
 

@@ -10,7 +10,22 @@ import { buildBusinessKey } from "#lib/idempotency.js";
  */
 
 export const AIRTABLE_API_BASE = "https://api.airtable.com/v0";
+export const AIRTABLE_CONTENT_API_BASE = "https://content.airtable.com/v0";
 export const DEFAULT_AIRTABLE_TIMEOUT_MS = 15_000;
+export const DEFAULT_AIRTABLE_UPLOAD_TIMEOUT_MS = 30_000;
+/** Airtable's direct-upload limit; larger files need a public URL, which we do not use. */
+export const MAX_ATTACHMENT_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+const SAVE_FAILED_USER_MESSAGE =
+  "⚠️ Pude leer la factura, pero no pude guardarla en Airtable.";
+const ATTACHMENT_FAILED_USER_MESSAGE =
+  "⚠️ Registré los datos en Airtable, pero no pude subir el archivo.";
+
+const CONTENT_TYPE_EXTENSION: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+};
 
 /** Column names expected in the Airtable table. */
 export const AIRTABLE_FIELDS = {
@@ -28,6 +43,7 @@ export const AIRTABLE_FIELDS = {
   description: "Description",
   cufe: "CUFE",
   sourceFile: "Source File",
+  attachment: "Attachment",
   telegramUserId: "Telegram User ID",
   telegramChatId: "Telegram Chat ID",
   createdAt: "Created At",
@@ -36,14 +52,17 @@ export const AIRTABLE_FIELDS = {
 
 /** Raised when Airtable cannot be reached or rejects the request. */
 export class AirtableError extends Error {
-  readonly userMessage =
-    "⚠️ Pude leer la factura, pero no pude guardarla en Airtable.";
+  readonly userMessage: string;
   readonly status: number | null;
 
-  constructor(message: string, options?: { status?: number | null; cause?: unknown }) {
-    super(message, options);
+    constructor(
+    message: string,
+    options?: { status?: number | null; cause?: unknown; userMessage?: string },
+  ) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "AirtableError";
     this.status = options?.status ?? null;
+    this.userMessage = options?.userMessage ?? SAVE_FAILED_USER_MESSAGE;
   }
 }
 
@@ -52,6 +71,23 @@ export interface AirtableConfig {
   baseId: string;
   tableName: string;
   timeoutMs: number;
+  uploadTimeoutMs?: number;
+}
+
+export type UploadAttachmentResult =
+  | { attached: true; record: AirtableRecord }
+  | { attached: false; reason: "too_large" };
+
+/** True when the record already has at least one file in the Attachment cell. */
+export function recordHasAttachment(record: AirtableRecord): boolean {
+  const value = record.fields[AIRTABLE_FIELDS.attachment];
+  return Array.isArray(value) && value.length > 0;
+}
+
+export function fileNameForUpload(fileName: string, contentType: string): string {
+  if (fileName.includes(".")) return fileName;
+  const extension = CONTENT_TYPE_EXTENSION[contentType];
+  return extension === undefined ? fileName : `${fileName}.${extension}`;
 }
 
 export function loadAirtableConfig(env: NodeJS.ProcessEnv = process.env): AirtableConfig {
@@ -110,11 +146,15 @@ export class AirtableInvoicesClient {
     )}`;
   }
 
-  async #request(url: string, init: RequestInit): Promise<unknown> {
+  get #uploadTimeoutMs(): number {
+    return this.#config.uploadTimeoutMs ?? DEFAULT_AIRTABLE_UPLOAD_TIMEOUT_MS;
+  }
+
+  async #request(url: string, init: RequestInit, timeoutMs = this.#config.timeoutMs): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
       controller.abort();
-    }, this.#config.timeoutMs);
+    }, timeoutMs);
 
     let response: Response;
     try {
@@ -210,5 +250,51 @@ export class AirtableInvoicesClient {
     })) as AirtableRecord;
 
     return body;
+  }
+
+  /**
+   * Uploads file bytes into the Attachment cell. Airtable appends; it does not
+   * replace existing files. Files over 5 MB are skipped without calling the API.
+   */
+  async uploadAttachment(input: {
+    recordId: string;
+    bytes: Uint8Array;
+    fileName: string;
+    contentType: string;
+  }): Promise<UploadAttachmentResult> {
+    if (input.bytes.byteLength > MAX_ATTACHMENT_UPLOAD_BYTES) {
+      return { attached: false, reason: "too_large" };
+    }
+
+    const url = `${AIRTABLE_CONTENT_API_BASE}/${encodeURIComponent(
+      this.#config.baseId,
+    )}/${encodeURIComponent(input.recordId)}/${encodeURIComponent(
+      AIRTABLE_FIELDS.attachment,
+    )}/uploadAttachment`;
+
+    try {
+      const record = (await this.#request(
+        url,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contentType: input.contentType,
+            filename: fileNameForUpload(input.fileName, input.contentType),
+            file: Buffer.from(input.bytes).toString("base64"),
+          }),
+        },
+        this.#uploadTimeoutMs,
+      )) as AirtableRecord;
+      return { attached: true, record };
+    } catch (error) {
+      if (error instanceof AirtableError) {
+        throw new AirtableError(error.message, {
+          status: error.status,
+          cause: error,
+          userMessage: ATTACHMENT_FAILED_USER_MESSAGE,
+        });
+      }
+      throw error;
+    }
   }
 }
