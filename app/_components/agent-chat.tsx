@@ -2,7 +2,15 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon, FileTextIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
+import {
+  AlertCircleIcon,
+  BrainIcon,
+  FileTextIcon,
+  LogOutIcon,
+  PlusIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react";
 import { useState } from "react";
 import {
   Conversation,
@@ -29,22 +37,63 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { inferInvoiceMediaType, INVOICE_FILE_ACCEPT } from "@/lib/invoice-upload";
+import {
+  inferInvoiceMediaType,
+  INVOICE_FILE_ACCEPT,
+  isSendableAttachmentData,
+} from "@/lib/invoice-upload";
+import { CameraCaptureButton } from "./camera-capture-dialog";
 import { AgentMessage } from "./agent-message";
 
 const AGENT_NAME = "Facturas";
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
+async function blobUrlToDataUrl(url: string): Promise<string | null> {
+  if (!url.startsWith("blob:")) return null;
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () =>
+        resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function defaultSessionPath(sessionId: string): void {
+  // Next patches window.history to navigate, which would detach the active stream.
+  History.prototype.replaceState.call(
+    window.history,
+    window.history.state,
+    "",
+    `/s/${encodeURIComponent(sessionId)}`,
+  );
+}
+
 export function AgentChat({
   sessionId,
   sessionless = false,
+  host,
+  onNewChat,
+  onLogout,
+  onSessionPath = defaultSessionPath,
 }: {
   readonly sessionId?: string;
   readonly sessionless?: boolean;
+  readonly host?: string;
+  readonly onNewChat?: () => void;
+  readonly onLogout?: () => void;
+  readonly onSessionPath?: (sessionId: string) => void;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
+    host,
     initialSession:
       sessionId === undefined
         ? undefined
@@ -55,13 +104,7 @@ export function AgentChat({
     resume: sessionId !== undefined,
     onSessionChange(session) {
       if (sessionId === undefined && session !== undefined) {
-        // Next patches window.history to navigate, which would detach the active stream.
-        History.prototype.replaceState.call(
-          window.history,
-          window.history.state,
-          "",
-          `/s/${encodeURIComponent(session.sessionId)}`,
-        );
+        onSessionPath(session.sessionId);
       }
     },
   });
@@ -113,8 +156,16 @@ export function AgentChat({
         return;
       }
 
+      const data = isSendableAttachmentData(file.url)
+        ? file.url
+        : await blobUrlToDataUrl(file.url);
+      if (data === null) {
+        setCancellationError("No se pudo leer el archivo adjunto. Probá de nuevo.");
+        return;
+      }
+
       parts.push({
-        data: file.url,
+        data,
         filename: file.filename,
         mediaType,
         type: "file",
@@ -154,6 +205,7 @@ export function AgentChat({
               <PromptInputActionAddAttachments label="Adjuntar factura (PDF, JPG o PNG)" />
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
+          <CameraCaptureButton />
         </PromptInputTools>
         <ComposerAction
           hasInputText={hasInputText}
@@ -167,8 +219,12 @@ export function AgentChat({
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {showConversationLayout ? (
-        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
+      {showConversationLayout || onLogout !== undefined ? (
+        <ChatHeader
+          canStartNewChat={activeSessionId !== undefined}
+          onLogout={onLogout}
+          onNewChat={onNewChat ?? (() => window.location.assign("/s"))}
+        />
       ) : null}
 
       {showConversationLayout ? (
@@ -307,16 +363,37 @@ function ErrorMessage({ message }: { readonly message: string }) {
   );
 }
 
-function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) {
+function ChatHeader({
+  canStartNewChat,
+  onLogout,
+  onNewChat,
+}: {
+  readonly canStartNewChat: boolean;
+  readonly onLogout?: () => void;
+  readonly onNewChat: () => void;
+}) {
   return (
     <header className="pointer-events-none fixed top-0 right-0 left-0 z-20 h-14">
       <div className="relative mx-auto flex h-full w-full max-w-3xl items-center justify-center bg-background px-24">
+        {onLogout !== undefined ? (
+          <Button
+            aria-label="Cerrar sesión"
+            className="pointer-events-auto fixed top-3 left-6"
+            onClick={onLogout}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <LogOutIcon className="size-4" />
+            <span className="hidden font-normal text-sm sm:inline">Cerrar sesión</span>
+          </Button>
+        ) : null}
         <span className="truncate text-muted-foreground text-sm">{AGENT_NAME}</span>
         {canStartNewChat ? (
           <Button
             aria-label="Nueva conversación"
             className="pointer-events-auto fixed top-3 right-6 pr-4"
-            onClick={() => window.location.assign("/s")}
+            onClick={onNewChat}
             size="sm"
             type="button"
             variant="ghost"

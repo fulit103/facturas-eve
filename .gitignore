@@ -6,6 +6,9 @@ node_modules
 .output
 .nitro
 dist
+desktop/out
+desktop/release
+*.tgz
 .DS_Store
 *.tsbuildinfo
 

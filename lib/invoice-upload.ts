@@ -27,3 +27,12 @@ export function inferInvoiceMediaType(fileName: string, declaredType = ""): stri
 export function isInvoiceUpload(file: File): boolean {
   return inferInvoiceMediaType(file.name, file.type) !== null;
 }
+
+/**
+ * eve only stages byte-backed file parts (data URLs) or fetchable http(s)
+ * URLs. A leftover `blob:` URL is renderer-local and arrives at the model as
+ * invalid image data.
+ */
+export function isSendableAttachmentData(url: string): boolean {
+  return url.startsWith("data:") || /^https?:\/\//u.test(url);
+}

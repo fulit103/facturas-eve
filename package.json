@@ -17,6 +17,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:eve": "eve build",
     "dev:eve": "eve dev",
+    "dev:desktop": "pnpm --filter facturas-desktop dev",
+    "package:desktop": "pnpm --filter facturas-desktop package:mac",
     "start:eve": "eve start"
   },
   "dependencies": {

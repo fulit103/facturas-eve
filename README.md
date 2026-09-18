@@ -9,6 +9,7 @@ Construido con [eve](https://eve.dev/docs), el framework de agentes de Vercel.
 ```
 Telegram ──► agent/channels/telegram.ts   (webhook verificado + upload policy)
 Web Chat ──► app/ + /eve/v1/*             (Next.js + useEveAgent)
+Desktop  ──► desktop/ (Electron) ──► proxy local ──► /eve/v1/*
                       │
                       ▼
              eve stagea el adjunto en /workspace/attachments (sandbox)
@@ -53,6 +54,7 @@ agent/
 app/
   _components/                 UI del chat (useEveAgent)
   page.tsx, s/                 rutas del Web Chat
+desktop/                       app Electron (Vite + proxy autenticado)
 next.config.ts                 integración eve/next (withEve)
 proxy.ts                       protege la UI con Basic auth en producción
 evals/
@@ -215,6 +217,37 @@ Configurá `FACTURAS_WEB_USERNAME` y `FACTURAS_WEB_PASSWORD` en Vercel (Preview 
 > HTTP Basic con credenciales compartidas sirve para uso interno o demo privada. Para varios usuarios con sesiones aisladas, reemplazá `appAuth` por un proveedor de identidad real (Auth.js, Clerk, etc.).
 
 Telegram y Web Chat son canales independientes: no comparten historial de conversación.
+
+## App de escritorio (Electron)
+
+La app en `desktop/` reutiliza el mismo chat React. El proceso principal guarda HTTP Basic en `safeStorage` y expone un proxy en `127.0.0.1` hacia `/eve/v1/*`, así el renderer no ve las credenciales y no hace falta abrir CORS en eve.
+
+### Desarrollo
+
+En una terminal, el Web Chat / agente:
+
+```bash
+pnpm dev
+```
+
+En otra:
+
+```bash
+cp desktop/.env.example desktop/.env
+pnpm dev:desktop
+```
+
+`FACTURAS_EVE_HOST` apunta al origen de eve (`http://localhost:3000` en local, o el deploy de Vercel). En local podés dejar usuario y contraseña vacíos (`localDev()`). En producción usá las mismas credenciales que `FACTURAS_WEB_USERNAME` / `FACTURAS_WEB_PASSWORD`.
+
+Las sesiones se guardan en el hash (`#/s/<sessionId>`). Reabrir ese hash reanuda el stream.
+
+### Empaquetado (macOS)
+
+```bash
+pnpm package:desktop
+```
+
+Genera `desktop/release/` (dmg y zip). Configurá `FACTURAS_EVE_HOST` en `desktop/.env` antes del build, o ingresalo en la pantalla de login.
 
 ### REPL sin interfaz web
 
