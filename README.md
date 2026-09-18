@@ -1,6 +1,6 @@
 # Agente de facturas
 
-Agente administrativo que recibe facturas por Telegram, las interpreta con LlamaIndex y las registra en Airtable.
+Agente administrativo que recibe facturas por Telegram o Web Chat, las interpreta con LlamaIndex y las registra en Airtable.
 
 Construido con [eve](https://eve.dev/docs), el framework de agentes de Vercel.
 
@@ -8,6 +8,7 @@ Construido con [eve](https://eve.dev/docs), el framework de agentes de Vercel.
 
 ```
 Telegram ──► agent/channels/telegram.ts   (webhook verificado + upload policy)
+Web Chat ──► app/ + /eve/v1/*             (Next.js + useEveAgent)
                       │
                       ▼
              eve stagea el adjunto en /workspace/attachments (sandbox)
@@ -37,17 +38,23 @@ agent/
   agent.ts                     modelo del agente
   instructions.md              identidad y reglas de comportamiento
   channels/
-    eve.ts                     canal HTTP por defecto (REPL, TUI)
+    eve.ts                     canal HTTP (Web Chat, REPL, TUI)
     telegram.ts                webhook de Telegram + upload policy
   tools/
     extract_invoice.ts         documento -> factura estructurada
     save_invoice.ts            factura estructurada -> fila en Airtable
   lib/
+    auth.ts                    HTTP Basic para el Web Chat en producción
     invoice-schema.ts          InvoiceSchema + normalización
     llamaindex.ts              LlamaParse + extracción estructurada
     airtable.ts                cliente REST de Airtable
     attachments.ts             validación de MIME, tamaño y rutas
     idempotency.ts             claves de deduplicación
+app/
+  _components/                 UI del chat (useEveAgent)
+  page.tsx, s/                 rutas del Web Chat
+next.config.ts                 integración eve/next (withEve)
+proxy.ts                       protege la UI con Basic auth en producción
 evals/
   evals.config.ts
   fixtures/                    PDFs de prueba
@@ -82,6 +89,8 @@ cp .env.example .env.local
 | `LLAMA_CLOUD_API_KEY` | sí | LlamaParse, para leer PDFs e imágenes. |
 | `AI_GATEWAY_API_KEY` | ver abajo | Credencial del AI Gateway de Vercel. |
 | `INVOICE_EXTRACTION_MODEL` | no | Modelo de extracción estructurada. Por defecto `openai/gpt-5.6-luna`. |
+| `FACTURAS_WEB_USERNAME` | sí (Web Chat en prod.) | Usuario HTTP Basic del Web Chat. |
+| `FACTURAS_WEB_PASSWORD` | sí (Web Chat en prod.) | Contraseña HTTP Basic del Web Chat. |
 
 Sobre el AI Gateway: `eve link` enlaza el proyecto de Vercel y escribe `VERCEL_OIDC_TOKEN` o `AI_GATEWAY_API_KEY` en `.env.local` automáticamente. Solo tenés que setear `AI_GATEWAY_API_KEY` a mano si no vas a enlazar un proyecto de Vercel.
 
@@ -179,17 +188,41 @@ Hay dos controles en cadena:
 
 Solo se aceptan `application/pdf`, `image/jpeg` y `image/png`. El contenido del archivo nunca se ejecuta: se lee como bytes y se envía a LlamaParse.
 
-## Desarrollo local
+## Web Chat
 
-REPL interactivo:
+Interfaz web generada con `eve add channel/web`. Corre junto al agente en el mismo proyecto Next.js.
+
+### Desarrollo local
 
 ```bash
 pnpm dev
 ```
 
-La primera vez, eve te va a pedir conectar una credencial de modelo (cuenta de Vercel, AI Gateway, o una API key). Desde el REPL podés adjuntar un archivo y probar el flujo completo sin Telegram.
+Abrí `http://localhost:3000`. En local, `localDev()` permite usar el chat sin HTTP Basic.
 
-Servidor sin interfaz de terminal:
+- `/` — landing
+- `/s` — nueva conversación
+- `/s/[sessionId]` — reanudar una sesión durable
+
+Desde el chat podés adjuntar PDF, JPG o PNG (máx. 15 MB) y pedir que se registre la factura.
+
+### Autenticación en producción
+
+El Web Chat usa HTTP Basic (`agent/lib/auth.ts`). `proxy.ts` protege las rutas de la UI; `/eve/v1/*` queda protegido por el canal eve.
+
+Configurá `FACTURAS_WEB_USERNAME` y `FACTURAS_WEB_PASSWORD` en Vercel (Preview y Production). Sin esas variables, el acceso desde el browser queda bloqueado.
+
+> HTTP Basic con credenciales compartidas sirve para uso interno o demo privada. Para varios usuarios con sesiones aisladas, reemplazá `appAuth` por un proveedor de identidad real (Auth.js, Clerk, etc.).
+
+Telegram y Web Chat son canales independientes: no comparten historial de conversación.
+
+### REPL sin interfaz web
+
+```bash
+pnpm run dev:eve
+```
+
+O el REPL clásico:
 
 ```bash
 pnpm exec eve dev --no-ui
@@ -251,6 +284,6 @@ pnpm exec eve deploy
 
 `eve link` enlaza el proyecto y trae la credencial del AI Gateway. Después cargá el resto de las variables en el proyecto de Vercel (Settings → Environment Variables):
 
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`.
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`, `FACTURAS_WEB_USERNAME`, `FACTURAS_WEB_PASSWORD`.
 
-Volvé a desplegar y registrá el webhook con la URL de producción.
+Volvé a desplegar y registrá el webhook de Telegram con la URL de producción. El Web Chat queda disponible en la misma URL del proyecto de Vercel.

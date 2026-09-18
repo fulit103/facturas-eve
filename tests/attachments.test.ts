@@ -15,10 +15,28 @@ const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
 const EXE_BYTES = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]); // "MZ" DOS header
 
-function fakeSandbox(files: Record<string, Uint8Array>, listing: string[] = []) {
+function fakeSandbox(files: Record<string, Uint8Array>, listing?: string[]) {
+  function childrenOf(dir: string): string[] {
+    const prefix = `${dir.replace(/\/+$/u, "")}/`;
+    const names = new Set<string>();
+    for (const path of Object.keys(files)) {
+      if (!path.startsWith(prefix)) continue;
+      const first = path.slice(prefix.length).split("/")[0];
+      if (first !== undefined && first !== "") names.add(first);
+    }
+    return [...names];
+  }
+
   return {
     readBinaryFile: vi.fn(async ({ path }: { path: string }) => files[path] ?? null),
-    run: vi.fn(async () => ({ exitCode: 0, stdout: listing.join("\n"), stderr: "" })),
+    run: vi.fn(async ({ command }: { command: string }) => {
+      const match = /ls -1t\s+(.+?)\s+2>/u.exec(command);
+      const raw = match?.[1] ?? JSON.stringify(ATTACHMENTS_DIR);
+      const dir = JSON.parse(raw) as string;
+      const isTopLevel = dir.replace(/\/+$/u, "") === ATTACHMENTS_DIR;
+      const stdout = (isTopLevel && listing !== undefined ? listing : childrenOf(dir)).join("\n");
+      return { exitCode: 0, stdout, stderr: "" };
+    }),
   };
 }
 
@@ -78,9 +96,15 @@ describe("validateAttachment", () => {
   });
 
   it("rejects other document formats", () => {
-    for (const fileName of ["factura.docx", "factura.zip", "factura.sh", "factura"]) {
+    for (const fileName of ["factura.docx", "factura.zip", "factura.sh"]) {
       expect(() => validateAttachment({ bytes: PDF_BYTES, fileName })).toThrow(AttachmentError);
     }
+  });
+
+  it("accepts an extensionless name when the bytes are a real invoice file", () => {
+    expect(validateAttachment({ bytes: PNG_BYTES, fileName: "d181d53bcaaef2a8" })).toBe(
+      "image/png",
+    );
   });
 
   it("rejects an empty file", () => {
@@ -145,6 +169,16 @@ describe("resolveAttachment", () => {
     expect(attachment.mediaType).toBe("image/png");
   });
 
+  it("falls back to the most recent attachment when the directory path is given", async () => {
+    const newest = `${ATTACHMENTS_DIR}/authenticated user.png`;
+    const sandbox = fakeSandbox({ [newest]: PNG_BYTES }, ["authenticated user.png"]);
+
+    const attachment = await resolveAttachment(sandbox, `${ATTACHMENTS_DIR}/`);
+
+    expect(attachment.fileName).toBe("authenticated user.png");
+    expect(attachment.mediaType).toBe("image/png");
+  });
+
   it("explains that nothing was attached when the directory is empty", async () => {
     await expect(resolveAttachment(fakeSandbox({}, []))).rejects.toThrow(
       /No encontré ningún archivo adjunto/u,
@@ -168,5 +202,38 @@ describe("resolveAttachment", () => {
 
     await expect(resolveAttachment(sandbox, "/etc/passwd")).rejects.toThrow(AttachmentError);
     expect(sandbox.readBinaryFile).not.toHaveBeenCalled();
+  });
+
+  it("reads the file inside an eve hash directory when no path is given", async () => {
+    const filePath = `${ATTACHMENTS_DIR}/d181d53bcaaef2a8/Screenshot 2026-09-09.png`;
+    const sandbox = fakeSandbox({ [filePath]: PNG_BYTES }, ["d181d53bcaaef2a8"]);
+
+    const attachment = await resolveAttachment(sandbox);
+
+    expect(attachment.fileName).toBe("Screenshot 2026-09-09.png");
+    expect(attachment.mediaType).toBe("image/png");
+    expect(attachment.path).toBe(filePath);
+    expect(attachment.bytes).toEqual(PNG_BYTES);
+  });
+
+  it("reads inside a hash directory when that path is given", async () => {
+    const filePath = `${ATTACHMENTS_DIR}/11616363135d405d/authenticated user.png`;
+    const sandbox = fakeSandbox({ [filePath]: PNG_BYTES });
+
+    const attachment = await resolveAttachment(sandbox, `${ATTACHMENTS_DIR}/11616363135d405d`);
+
+    expect(attachment.fileName).toBe("authenticated user.png");
+    expect(attachment.mediaType).toBe("image/png");
+    expect(attachment.path).toBe(filePath);
+  });
+
+  it("reads an extensionless staged file by sniffing the bytes", async () => {
+    const path = `${ATTACHMENTS_DIR}/d181d53bcaaef2a8`;
+    const sandbox = fakeSandbox({ [path]: PNG_BYTES });
+
+    const attachment = await resolveAttachment(sandbox, path);
+
+    expect(attachment.mediaType).toBe("image/png");
+    expect(attachment.bytes).toEqual(PNG_BYTES);
   });
 });

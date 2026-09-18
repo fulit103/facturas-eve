@@ -28,7 +28,9 @@ const outputSchema = z.object({
 export default defineTool({
   description: [
     "Extract structured invoice data from an attachment the user sent (PDF, JPG, or PNG).",
-    `Attachments are staged under ${ATTACHMENTS_DIR}. Omit filePath to use the most recent one.`,
+    `Attachments are staged under ${ATTACHMENTS_DIR}, often as ${ATTACHMENTS_DIR}/<id>/<filename>.`,
+    "Always omit filePath unless you know the exact filename. Never pass the directory path",
+    `or a hash folder (${ATTACHMENTS_DIR} or ${ATTACHMENTS_DIR}/<id>); omit filePath to read the latest file.`,
     "Returns the invoice fields, an idempotencyKey to pass to save_invoice, and the list of",
     "critical fields the document did not contain. Does not save anything.",
   ].join(" "),
