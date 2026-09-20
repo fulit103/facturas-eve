@@ -1,12 +1,13 @@
 # Agente de facturas
 
-Agente administrativo que recibe facturas por Telegram o Web Chat, las interpreta con LlamaIndex y las registra en Airtable.
+Agente administrativo que recibe facturas por WhatsApp, Telegram o Web Chat, las interpreta con LlamaIndex y las registra en Airtable.
 
 Construido con [eve](https://eve.dev/docs), el framework de agentes de Vercel.
 
 ## Cómo funciona
 
 ```
+WhatsApp ──► agent/channels/whatsapp.ts   (Kapso vía Chat SDK, firma verificada)
 Telegram ──► agent/channels/telegram.ts   (webhook verificado + upload policy)
 Web Chat ──► app/ + /eve/v1/*             (Next.js + useEveAgent)
                       │
@@ -40,6 +41,7 @@ agent/
   channels/
     eve.ts                     canal HTTP (Web Chat, REPL, TUI)
     telegram.ts                webhook de Telegram + upload policy
+    whatsapp.ts                webhook de Kapso (WhatsApp) vía Chat SDK
   tools/
     extract_invoice.ts         documento -> factura estructurada
     save_invoice.ts            factura estructurada -> fila en Airtable
@@ -49,6 +51,7 @@ agent/
     llamaindex.ts              LlamaParse + extracción estructurada
     airtable.ts                cliente REST de Airtable
     attachments.ts             validación de MIME, tamaño y rutas
+    whatsapp-content.ts        descarga y valida los adjuntos de WhatsApp
     idempotency.ts             claves de deduplicación
 app/
   _components/                 UI del chat (useEveAgent)
@@ -83,6 +86,9 @@ cp .env.example .env.local
 | `TELEGRAM_BOT_TOKEN` | sí | Responder mensajes y descargar adjuntos con `getFile`. |
 | `TELEGRAM_WEBHOOK_SECRET_TOKEN` | sí | Verificar el header `X-Telegram-Bot-Api-Secret-Token` de cada update. |
 | `TELEGRAM_BOT_USERNAME` | solo en grupos | Detectar menciones `@bot` y comandos `/ask@bot`. |
+| `KAPSO_API_KEY` | sí (WhatsApp) | Enviar mensajes y descargar la media de WhatsApp desde Kapso. |
+| `KAPSO_PHONE_NUMBER_ID` | sí (WhatsApp) | Id del número de WhatsApp Business conectado en Kapso. |
+| `KAPSO_WEBHOOK_SECRET` | sí (WhatsApp) | Verificar el header `X-Webhook-Signature` de cada entrega de Kapso. |
 | `AIRTABLE_API_KEY` | sí | Personal access token con `data.records:read` y `data.records:write`. |
 | `AIRTABLE_BASE_ID` | sí | Id de la base, empieza con `app`. |
 | `AIRTABLE_TABLE_NAME` | no | Nombre de la tabla. Por defecto `Invoices`. |
@@ -134,6 +140,53 @@ Para borrarlo (por ejemplo, al volver a desarrollo local):
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
 ```
 
+## Conectar WhatsApp con Kapso
+
+[Kapso](https://kapso.ai) es el plugin oficial de WhatsApp para eve: publica
+`@kapso/chat-adapter`, un adaptador de [Chat SDK](https://chat-sdk.dev), y eve lo
+monta con su canal `chat-sdk`. Kapso se ocupa del alta del número, de la API de
+WhatsApp Cloud y de la media; el agente solo ve hilos de Chat SDK.
+
+1. Creá una cuenta en [kapso.ai](https://kapso.ai) y conectá tu número de WhatsApp Business.
+2. Copiá la API key a `KAPSO_API_KEY` y el id del número a `KAPSO_PHONE_NUMBER_ID`.
+3. Generá un secreto para el webhook:
+
+```bash
+openssl rand -hex 32
+```
+
+Guardalo en `KAPSO_WEBHOOK_SECRET` y usá el **mismo valor** en el panel de Kapso.
+
+4. En el panel de Kapso, configurá el webhook así:
+
+| Campo | Valor |
+| --- | --- |
+| Endpoint URL | `https://TU-APP.vercel.app/eve/v1/kapso` |
+| Secret key | el mismo `KAPSO_WEBHOOK_SECRET` |
+| Eventos | `whatsapp.message.received` |
+
+El adaptador verifica la firma `X-Webhook-Signature` de cada entrega. Si el secreto
+no coincide, el webhook responde 401 y no se despacha ningún turno.
+
+### Decisiones del canal
+
+- **`streaming: false`.** WhatsApp no permite editar un mensaje ya enviado
+  (`editMessage` del adaptador lanza `NotImplementedError`). Con streaming activo
+  el canal publicaría un primer mensaje parcial que nunca podría actualizar, así
+  que la respuesta se publica una sola vez, al terminar el turno.
+- **Adjuntos por bytes, no por URL.** `messageToUserContent` de eve solo pasa los
+  adjuntos que traen `url` pública, y la media de WhatsApp está detrás de la API
+  de Kapso. Por eso `agent/lib/whatsapp-content.ts` llama al `fetchData()` del
+  adjunto dentro del webhook y manda los bytes: eve los stagea en
+  `/workspace/attachments` igual que los de Telegram.
+- **Estado en memoria.** El estado de Chat SDK (suscripciones, locks,
+  deduplicación de entregas) usa `@chat-adapter/state-memory`, que no sobrevive
+  entre invocaciones serverless. Alcanza porque el agente solo atiende DMs y
+  porque `save_invoice` ya deduplica por hash del archivo. Si necesitás
+  deduplicación durable de webhooks, instalá `@chat-adapter/state-redis` y
+  cambiá `createMemoryState()` por su `createRedisState()` en
+  `agent/channels/whatsapp.ts`.
+
 ## Configurar Airtable
 
 1. Creá una base nueva en [airtable.com](https://airtable.com).
@@ -184,7 +237,7 @@ Si cualquiera de las dos encuentra un registro, la tool devuelve `duplicate: tru
 
 Hay dos controles en cadena:
 
-1. **En el canal** (`agent/channels/telegram.ts`): `uploadPolicy` rechaza tipos no permitidos y archivos de más de 15 MB antes de que eve descargue nada.
+1. **En el canal**: en Telegram (`agent/channels/telegram.ts`) el `uploadPolicy` rechaza tipos no permitidos y archivos de más de 15 MB antes de que eve descargue nada. En WhatsApp (`agent/lib/whatsapp-content.ts`) el corte es equivalente: descarta por tamaño declarado antes de descargar, y por magic bytes después.
 2. **En la tool** (`agent/lib/attachments.ts`): revalida sobre los bytes reales — magic bytes de PDF/JPEG/PNG, coincidencia con la extensión, tamaño, y bloqueo de rutas fuera de `/workspace/attachments`.
 
 Solo se aceptan `application/pdf`, `image/jpeg` y `image/png`. El contenido del archivo nunca se ejecuta: se lee como bytes y se envía a LlamaParse.
@@ -215,7 +268,7 @@ Configurá `FACTURAS_WEB_USERNAME` y `FACTURAS_WEB_PASSWORD` en Vercel (Preview 
 
 > HTTP Basic con credenciales compartidas sirve para uso interno o demo privada. Para varios usuarios con sesiones aisladas, reemplazá `appAuth` por un proveedor de identidad real (Auth.js, Clerk, etc.).
 
-Telegram y Web Chat son canales independientes: no comparten historial de conversación.
+WhatsApp, Telegram y Web Chat son canales independientes: no comparten historial de conversación.
 
 ### REPL sin interfaz web
 
@@ -229,7 +282,7 @@ O el REPL clásico:
 pnpm exec eve dev --no-ui
 ```
 
-Para probar el webhook de Telegram contra tu máquina necesitás una URL pública (por ejemplo un túnel) y registrarla con el `setWebhook` de arriba.
+Para probar el webhook de Telegram contra tu máquina necesitás una URL pública (por ejemplo un túnel) y registrarla con el `setWebhook` de arriba. Lo mismo vale para WhatsApp: apuntá el webhook de Kapso a `https://TU-TUNEL/eve/v1/kapso`.
 
 ## Pruebas
 
@@ -250,6 +303,7 @@ Cobertura:
 | `tests/extract-invoice-tool.test.ts` | La tool `extract_invoice` con la librería mockeada. |
 | `tests/save-invoice.test.ts` | La tool `save_invoice` y el cliente de Airtable, incluyendo duplicados y upload del adjunto. |
 | `tests/idempotency.test.ts` | Estabilidad de las claves de deduplicación. |
+| `tests/whatsapp-content.test.ts` | Conversión de un mensaje de WhatsApp a `UserContent`: descarga, tamaño, tipo y errores. |
 
 ## Evals
 
@@ -285,6 +339,6 @@ pnpm exec eve deploy
 
 `eve link` enlaza el proyecto y trae la credencial del AI Gateway. Después cargá el resto de las variables en el proyecto de Vercel (Settings → Environment Variables):
 
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`, `FACTURAS_WEB_USERNAME`, `FACTURAS_WEB_PASSWORD`.
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `KAPSO_API_KEY`, `KAPSO_PHONE_NUMBER_ID`, `KAPSO_WEBHOOK_SECRET`, `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`, `FACTURAS_WEB_USERNAME`, `FACTURAS_WEB_PASSWORD`.
 
-Volvé a desplegar y registrá el webhook de Telegram con la URL de producción. El Web Chat queda disponible en la misma URL del proyecto de Vercel.
+Volvé a desplegar, registrá el webhook de Telegram con la URL de producción y apuntá el webhook de Kapso a `https://TU-APP.vercel.app/eve/v1/kapso`. El Web Chat queda disponible en la misma URL del proyecto de Vercel.
