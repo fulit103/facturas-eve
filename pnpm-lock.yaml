@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@chat-adapter/state-memory':
+        specifier: ^4.41.0
+        version: 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
+      '@kapso/chat-adapter':
+        specifier: ^0.1.1
+        version: 0.1.1(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4))(zod@4.5.4)
       '@llamaindex/llama-cloud':
         specifier: 2.16.0
         version: 2.16.0
@@ -44,6 +50,9 @@ importers:
       ai:
         specifier: ^7.0.105
         version: 7.0.105(zod@4.5.4)
+      chat:
+        specifier: ^4.41.0
+        version: 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -139,6 +148,14 @@ packages:
 
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
+
+  '@chat-adapter/shared@4.41.0':
+    resolution: {integrity: sha512-h/MiKMoQf5nl5Zgua8EMxVSdyylFg8pA+nKnwYNexPHzr59I1PT9u7z3EVSOrjbMjre3MmlrUM0TPbIWaRrSZg==}
+    engines: {node: '>=20'}
+
+  '@chat-adapter/state-memory@4.41.0':
+    resolution: {integrity: sha512-Px+csQMhc0/Z1SauPdzV8ar9GJ4EoCThFi2a+e3HcrcYTdwLSNhT/h4MJrfaA3/8PCOO4Y4EvanwGVYzcLbhhA==}
+    engines: {node: '>=20'}
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
@@ -335,6 +352,16 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@kapso/chat-adapter@0.1.1':
+    resolution: {integrity: sha512-4QAqB4ADI7k1bbvHdjIB0r3qrBHahtET1IeJHYXc8ND+3uF0OmCK/5hRoNrKYhCzMMPHESK35t6wVkc+zWcJyw==}
+    engines: {node: '>=20.19'}
+    peerDependencies:
+      chat: ^4.29.0
+
+  '@kapso/whatsapp-cloud-api@0.2.3':
+    resolution: {integrity: sha512-qYZbxBvX6kX7I7dI0PX1W6TWUYQkJKXnf7UqmeWlYALIgsiP5CvFvH45jsWrdjdUPwK1emsyIuHKReDBd7j/Sg==}
+    engines: {node: '>=20.19'}
 
   '@llamaindex/llama-cloud@2.16.0':
     resolution: {integrity: sha512-yF1XkIvHCX+rAn7FJGbxEqDHqp4brkYRxHuA9+/Y6S+L6khDFFzssfwLYDOQeS0GGu3rlqiIXm4zjBKva98D9Q==}
@@ -1694,6 +1721,9 @@ packages:
   '@workflow/serde@4.1.0':
     resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
 
+  '@workflow/serde@4.1.0-beta.2':
+    resolution: {integrity: sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww==}
+
   ai@7.0.105:
     resolution: {integrity: sha512-gkV3W+tTtWwQ41KNV/KjV8wabBrk+bnbnZ3f0AWp/T9LLyljose8uhFViKleVy7tIdEiR2PiS4BpbNdcExf7rQ==}
     engines: {node: '>=22'}
@@ -1737,6 +1767,21 @@ packages:
 
   character-reference-invalid@2.0.1:
     resolution: {integrity: sha512-iBZ4F4wRbyORVsu0jPV7gXkOsGYjGHPmAyv+HiHG8gi5PtC9KI2j1+v8/tlibRvjoWX027ypmG/n0HtO5t7unw==}
+
+  chat@4.41.0:
+    resolution: {integrity: sha512-vMeODhulMdi7od1c6e4B/ZfIp/zq0f5KP3WKNCAAdNrTOeDgjRNZQZahaIax/t/gu+LE5vwJSjFU46Ro9Kx9tA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      ai: ^6.0.182 || ^7.0.0
+      workflow: ^5.0.0-beta.35
+      zod: ^3.0.0 || ^4.0.0
+    peerDependenciesMeta:
+      ai:
+        optional: true
+      workflow:
+        optional: true
+      zod:
+        optional: true
 
   class-variance-authority@0.7.1:
     resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
@@ -3225,6 +3270,24 @@ snapshots:
 
   '@braintree/sanitize-url@7.1.2': {}
 
+  '@chat-adapter/shared@4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)':
+    dependencies:
+      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
+  '@chat-adapter/state-memory@4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)':
+    dependencies:
+      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
   '@chevrotain/types@11.1.2': {}
 
   '@emnapi/runtime@1.11.3':
@@ -3372,6 +3435,21 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@kapso/chat-adapter@0.1.1(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4))(zod@4.5.4)':
+    dependencies:
+      '@chat-adapter/shared': 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
+      '@kapso/whatsapp-cloud-api': 0.2.3
+      chat: 4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4)
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
+  '@kapso/whatsapp-cloud-api@0.2.3':
+    dependencies:
+      zod: 4.5.4
 
   '@llamaindex/llama-cloud@2.16.0': {}
 
@@ -4689,6 +4767,8 @@ snapshots:
 
   '@workflow/serde@4.1.0': {}
 
+  '@workflow/serde@4.1.0-beta.2': {}
+
   ai@7.0.105(zod@4.5.4):
     dependencies:
       '@ai-sdk/gateway': 4.0.85(zod@4.5.4)
@@ -4719,6 +4799,21 @@ snapshots:
   character-entities@2.0.2: {}
 
   character-reference-invalid@2.0.1: {}
+
+  chat@4.41.0(ai@7.0.105(zod@4.5.4))(zod@4.5.4):
+    dependencies:
+      '@workflow/serde': 4.1.0-beta.2
+      mdast-util-to-string: 4.0.0
+      remark-gfm: 4.0.1
+      remark-parse: 11.0.0
+      remark-stringify: 11.0.0
+      remend: 1.3.0
+      unified: 11.0.5
+    optionalDependencies:
+      ai: 7.0.105(zod@4.5.4)
+      zod: 4.5.4
+    transitivePeerDependencies:
+      - supports-color
 
   class-variance-authority@0.7.1:
     dependencies:
