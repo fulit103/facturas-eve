@@ -1,6 +1,7 @@
-import { telegramChannel } from "eve/channels/telegram";
+import { resolveTelegramBotToken, telegramChannel } from "eve/channels/telegram";
 
 import { MAX_UPLOAD_BYTES } from "#lib/attachments.js";
+import { chartsFromActionResult, sendTelegramCharts } from "#lib/codeact/telegram-charts.js";
 
 /**
  * Telegram surface for the invoice agent.
@@ -12,6 +13,9 @@ import { MAX_UPLOAD_BYTES } from "#lib/attachments.js";
  * `uploadPolicy` is the first of two gates: it stops disallowed media types and
  * oversized files at the webhook, before eve fetches them via `getFile`. The
  * second gate lives in `extract_invoice`, which re-checks the real bytes.
+ *
+ * Charts produced by `execute_python` are sent as photos as soon as the tool
+ * finishes, before the agent's text answer.
  */
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME,
@@ -20,5 +24,22 @@ export default telegramChannel({
     // Strict validation happens later in attachments.ts via magic bytes.
     allowedMediaTypes: ["application/*", "image/jpeg", "image/png"],
     maxBytes: MAX_UPLOAD_BYTES,
+  },
+  events: {
+    async "action.result"(data, channel) {
+      if (data.status === "failed") return;
+      const charts = chartsFromActionResult(data.result);
+      if (charts.length === 0 || channel.telegram.chatId === "") return;
+      try {
+        await sendTelegramCharts({
+          charts,
+          chatId: channel.telegram.chatId,
+          messageThreadId: channel.telegram.messageThreadId,
+          botToken: await resolveTelegramBotToken(),
+        });
+      } catch (error) {
+        console.error("[telegram] could not deliver execute_python charts", error);
+      }
+    },
   },
 });

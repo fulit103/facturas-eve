@@ -1,6 +1,6 @@
 # Agente de facturas
 
-Agente administrativo que recibe facturas por Telegram o Web Chat, las interpreta con LlamaIndex y las registra en Airtable.
+Agente administrativo que recibe facturas por Telegram o Web Chat, las interpreta con LlamaIndex y las registra en Airtable. También responde preguntas sobre los datos de Airtable y genera gráficos escribiendo y ejecutando Python (enfoque CodeAct).
 
 Construido con [eve](https://eve.dev/docs), el framework de agentes de Vercel.
 
@@ -23,6 +23,22 @@ Web Chat ──► app/ + /eve/v1/*             (Next.js + useEveAgent)
   markdown  ──► InvoiceSchema  bytes del sandbox ──► campo Attachment
 ```
 
+Para preguntas sobre los datos el camino es otro:
+
+```
+"¿cuánto llevo facturado por mes?"
+          │
+          ▼
+  execute_python(code) ──► sandbox de la sesión (sin red, sin credenciales)
+                              python + pandas + matplotlib
+                              airtable.records(...) ──RPC──┐
+                                                           ▼
+                           runtime de la app: gateway de solo lectura ──► Airtable (GET)
+          │
+          ▼
+  resultado resumido al modelo · gráfico PNG a la UI / Telegram
+```
+
 `extract_invoice` nunca escribe en Airtable. `save_invoice` no vuelve a parsear el documento: si Airtable falla, el agente reintenta solo el guardado sin pagar otra extracción. Sí lee los bytes del sandbox para subir el PDF/JPG/PNG original al campo `Attachment`.
 
 ### Sobre el SDK de LlamaIndex
@@ -40,10 +56,21 @@ agent/
   channels/
     eve.ts                     canal HTTP (Web Chat, REPL, TUI)
     telegram.ts                webhook de Telegram + upload policy
+  sandbox.ts                   venv de Python + red bloqueada por sesión
   tools/
     extract_invoice.ts         documento -> factura estructurada
     save_invoice.ts            factura estructurada -> fila en Airtable
+    execute_python.ts          CodeAct: consultas, métricas y gráficos sobre Airtable
+    bash.ts, read_file.ts,     deshabilitadas: el análisis pasa solo por execute_python
+    write_file.ts
   lib/
+    codeact/
+      airtable-gateway.ts      lecturas de solo lectura: paginación, límites, reintentos
+      executor.ts              corre el runner, atiende el RPC, timeout, gráficos
+      runner-source.ts         runner de Python + cliente `airtable` interno
+      model-view.ts            lo que ve el modelo (sin los bytes de los gráficos)
+      telegram-charts.ts       envía los gráficos como foto por Telegram
+      sandbox-setup.ts         script de instalación del entorno de Python
     auth.ts                    HTTP Basic para el Web Chat en producción
     invoice-schema.ts          InvoiceSchema + normalización
     llamaindex.ts              LlamaParse + extracción estructurada
@@ -52,6 +79,7 @@ agent/
     idempotency.ts             claves de deduplicación
 app/
   _components/                 UI del chat (useEveAgent)
+    execute-python-result.tsx  código, tabla de resultado y gráficos de execute_python
   page.tsx, s/                 rutas del Web Chat
 next.config.ts                 integración eve/next (withEve)
 proxy.ts                       protege la UI con Basic auth en producción
@@ -59,6 +87,7 @@ evals/
   evals.config.ts
   fixtures/                    PDFs de prueba
   invoice/*.eval.ts            casos de evaluación del agente
+  analytics/*.eval.ts          consultas y gráficos con execute_python
 tests/                         pruebas unitarias (vitest)
 ```
 
@@ -86,6 +115,12 @@ cp .env.example .env.local
 | `AIRTABLE_API_KEY` | sí | Personal access token con `data.records:read` y `data.records:write`. |
 | `AIRTABLE_BASE_ID` | sí | Id de la base, empieza con `app`. |
 | `AIRTABLE_TABLE_NAME` | no | Nombre de la tabla. Por defecto `Invoices`. |
+| `AIRTABLE_READ_API_KEY` | recomendado | Token **de solo lectura** para `execute_python` (`data.records:read` + `schema.bases:read`). Si falta, usa `AIRTABLE_API_KEY`. |
+| `AIRTABLE_ANALYTICS_BASE_ID` | no | Base a consultar. Por defecto `AIRTABLE_BASE_ID`. |
+| `AIRTABLE_ANALYTICS_TABLES` | no | Lista separada por comas de tablas consultables. Vacío = todas las de la base. |
+| `AIRTABLE_ANALYTICS_MAX_RECORDS` | no | Máximo de registros por lectura (por defecto 20000). Por encima, la lectura falla en vez de truncarse. |
+| `CODEACT_TIMEOUT_MS` | no | Límite de tiempo por ejecución de Python (por defecto 60000). |
+| `CODEACT_MEMORY_MB` | no | Límite de memoria por ejecución (por defecto 1024). |
 | `LLAMA_CLOUD_API_KEY` | sí | LlamaParse, para leer PDFs e imágenes. |
 | `AI_GATEWAY_API_KEY` | ver abajo | Credencial del AI Gateway de Vercel. |
 | `INVOICE_EXTRACTION_MODEL` | no | Modelo de extracción estructurada. Por defecto `openai/gpt-5.6-luna`. |
@@ -139,6 +174,7 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
 1. Creá una base nueva en [airtable.com](https://airtable.com).
 2. Copiá el id de la base desde la URL (`https://airtable.com/appXXXXXXXX/...`) a `AIRTABLE_BASE_ID`.
 3. Creá un personal access token en [airtable.com/create/tokens](https://airtable.com/create/tokens) con los scopes `data.records:read` y `data.records:write`, dándole acceso a esa base.
+   Para las consultas, creá un segundo token solo con `data.records:read` y `schema.bases:read` y guardalo en `AIRTABLE_READ_API_KEY`. Sin `schema.bases:read` el agente no puede descubrir las tablas.
 4. Nombrá la tabla `Invoices` (o cambiá `AIRTABLE_TABLE_NAME`).
 
 ### Campos que debe tener la tabla
@@ -188,6 +224,37 @@ Hay dos controles en cadena:
 2. **En la tool** (`agent/lib/attachments.ts`): revalida sobre los bytes reales — magic bytes de PDF/JPEG/PNG, coincidencia con la extensión, tamaño, y bloqueo de rutas fuera de `/workspace/attachments`.
 
 Solo se aceptan `application/pdf`, `image/jpeg` y `image/png`. El contenido del archivo nunca se ejecuta: se lee como bytes y se envía a LlamaParse.
+
+## Consultas y gráficos (CodeAct)
+
+El modelo tiene **una sola** herramienta para analizar datos: `execute_python(code)`. No hay herramientas separadas para listar tablas, filtrar ni graficar. Dentro de Python ya están cargados:
+
+| Nombre | Qué es |
+| --- | --- |
+| `airtable.list_tables()` | DataFrame con las tablas autorizadas y su campo primario. |
+| `airtable.describe_table("Tabla")` | DataFrame con campos, tipos y opciones (choices, links). |
+| `airtable.records("Tabla", fields=, formula=, view=, sort=, max_records=)` | DataFrame con todos los registros que cumplen el filtro. |
+| `airtable.get_record("Tabla", "rec…")` | Un registro como dict. |
+| `show_chart(title=)` | Guarda la figura actual como gráfico para el usuario. |
+| `money_axis(ax)` | Formatea un eje como `$1.500.000`. |
+| `pd`, `np`, `plt` | pandas, numpy, matplotlib. |
+
+Cómo funciona:
+
+- **Credenciales fuera del sandbox.** El cliente `airtable` de Python no tiene token ni red: escribe un pedido RPC en su stdout y espera la respuesta en un archivo. El gateway (`agent/lib/codeact/airtable-gateway.ts`) corre en el runtime de la app, agrega el token y solo hace `GET` a la base configurada (y a las tablas de `AIRTABLE_ANALYTICS_TABLES`, si está definida). No existe operación de escritura.
+- **Lecturas completas o error.** El gateway sigue todas las páginas (`offset`), respeta el límite de 5 req/s, reintenta 429/5xx con backoff (respetando `Retry-After`) y no reintenta errores 4xx. Si una consulta supera `AIRTABLE_ANALYTICS_MAX_RECORDS`, falla con un mensaje que pide filtrar; nunca devuelve un subconjunto como si fuera el total. `max_records` devuelve una muestra declarada (`complete: false`) y el modelo recibe esa marca en `dataReads`.
+- **Esquema real.** Tablas y campos inexistentes fallan con la lista de nombres válidos, así el modelo corrige en lugar de inventar.
+- **Contexto chico.** El modelo recibe la última expresión (tablas truncadas a 50 filas), el `print()` (máx. 6000 caracteres), las lecturas hechas y un resumen de variables. Los PNG de los gráficos no entran al contexto: viajan en el resultado completo de la tool, que usa la UI.
+- **Estado por sesión.** Las variables se guardan con `dill` en `/workspace/.codeact/state` del sandbox de la sesión. Cada conversación (chat de Telegram o sesión del Web Chat) tiene su propio sandbox, así que los datos no se cruzan entre usuarios.
+- **Límites.** 60 s y 1024 MB por ejecución (alarma + `RLIMIT_AS` dentro de Python, y kill desde el host 10 s después), 40 lecturas de Airtable por ejecución, 4 gráficos por ejecución. El sandbox corre con la red bloqueada (`deny-all`).
+- **Errores corregibles.** Una excepción vuelve como `{ type, message, line, code_line, traceback }` y el modelo reintenta con el código corregido; las variables anteriores siguen disponibles.
+- **Dónde se ven los gráficos.** En el Web Chat aparecen debajo del bloque "Análisis de datos" (`app/_components/execute-python-result.tsx`). En Telegram se mandan como foto con `sendPhoto` apenas termina la ejecución (`agent/channels/telegram.ts`).
+
+### Entorno de Python del sandbox
+
+`agent/sandbox.ts` instala en el template, una sola vez, un venv en `$HOME/.codeact-venv` con pandas, matplotlib y dill. Después, cada sesión corre con la red bloqueada. En Vercel el template solo puede salir a PyPI.
+
+El backend lo elige eve: Vercel Sandbox en producción, Docker en local si hay daemon, y si no, microsandbox o just-bash. **just-bash no tiene Python**: la extracción de facturas sigue funcionando, pero `execute_python` responde que el entorno de análisis no está disponible. Para probar el análisis en local usá Docker.
 
 ## Web Chat
 
@@ -250,6 +317,11 @@ Cobertura:
 | `tests/extract-invoice-tool.test.ts` | La tool `extract_invoice` con la librería mockeada. |
 | `tests/save-invoice.test.ts` | La tool `save_invoice` y el cliente de Airtable, incluyendo duplicados y upload del adjunto. |
 | `tests/idempotency.test.ts` | Estabilidad de las claves de deduplicación. |
+| `tests/airtable-gateway.test.ts` | Gateway de solo lectura: paginación, límites sin truncado silencioso, reintentos, allow-list, errores 4xx. |
+| `tests/execute-python.test.ts` | El runner real con `python3` local: descubrir el esquema, conteo por categoría, total por mes con gráfico, filtro de período reutilizando variables, errores corregibles, timeout, aislamiento entre sesiones y que el token no llegue al sandbox. Se salta si no hay pandas/matplotlib. |
+| `tests/codeact-presentation.test.ts` | Lo que ve el modelo (sin bytes de gráficos) y el envío de gráficos por Telegram. |
+
+Para correr `tests/execute-python.test.ts` localmente: `pip install pandas matplotlib dill`.
 
 ## Evals
 
@@ -273,6 +345,10 @@ pnpm exec eve eval invoice/saves-after-extraction
 | `invoice/asks-for-missing-critical-field` | Sin número de factura, pregunta en lugar de guardar. |
 | `invoice/duplicate-not-reinserted` | La misma factura dos veces no se inserta de nuevo. |
 | `invoice/rejects-unsupported-file` | Un archivo no permitido se rechaza. |
+| `analytics/counts-by-category` | "¿Cuántas facturas hay por proveedor?": descubre el esquema y calcula con `execute_python`. |
+| `analytics/monthly-chart-then-filter` | Gráfico del total por mes y luego filtro de un período, con gráfico en ambos turnos. |
+
+> Los evals de `analytics/` necesitan una base real y un sandbox con Python (Docker o Vercel).
 
 > `invoice/duplicate-not-reinserted` escribe una fila real en Airtable la primera vez que corre. Usá una base de pruebas.
 
@@ -285,6 +361,6 @@ pnpm exec eve deploy
 
 `eve link` enlaza el proyecto y trae la credencial del AI Gateway. Después cargá el resto de las variables en el proyecto de Vercel (Settings → Environment Variables):
 
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`, `FACTURAS_WEB_USERNAME`, `FACTURAS_WEB_PASSWORD`.
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN`, `TELEGRAM_BOT_USERNAME`, `AIRTABLE_API_KEY`, `AIRTABLE_READ_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, `LLAMA_CLOUD_API_KEY`, `FACTURAS_WEB_USERNAME`, `FACTURAS_WEB_PASSWORD`.
 
 Volvé a desplegar y registrá el webhook de Telegram con la URL de producción. El Web Chat queda disponible en la misma URL del proyecto de Vercel.
