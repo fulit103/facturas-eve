@@ -40,7 +40,7 @@ import {
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ExecutePythonCharts, ExecutePythonContent } from "./execute-python-result";
+import { ExecuteJsCharts, ExecuteJsContent } from "./execute-js-result";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -135,7 +135,7 @@ function AgentMessagePart({
         );
       }
 
-      if (part.toolName === "execute_python") {
+      if (part.toolName === "execute_js") {
         return (
           <>
             <Tool defaultOpen={part.state === "output-error"}>
@@ -146,14 +146,14 @@ function AgentMessagePart({
                 type="dynamic-tool"
               />
               <ToolContent>
-                <ExecutePythonContent
+                <ExecuteJsContent
                   errorText={part.errorText}
                   input={part.input}
                   output={part.output}
                 />
               </ToolContent>
             </Tool>
-            <ExecutePythonCharts output={part.output} />
+            <ExecuteJsCharts output={part.output} />
           </>
         );
       }

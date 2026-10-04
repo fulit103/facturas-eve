@@ -1,21 +1,21 @@
 "use client";
 
 import { AlertTriangleIcon, DatabaseIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { VisualizationSpec } from "vega-embed";
+import { ES_CO_FORMAT_LOCALE, ES_TIME_FORMAT_LOCALE } from "@/agent/lib/codeact/chart-locale";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 
 /**
- * Web Chat rendering for `execute_python`. The tool result carries the chart
- * PNGs (base64); the model only receives references to them, so the charts
- * shown here never enter the model's context.
+ * Web Chat rendering for `execute_js`. The tool result carries each chart's
+ * Vega-Lite spec (with its data); the model only receives references, so the
+ * charts drawn here never enter the model's context.
  */
 
 type Chart = {
   readonly id: string;
   readonly title: string;
-  readonly mediaType: string;
-  readonly width: number;
-  readonly height: number;
-  readonly dataBase64: string | null;
+  readonly spec: Record<string, unknown>;
 };
 
 type TableResult = {
@@ -42,7 +42,7 @@ type ExecutionOutput = {
     readonly type: string;
     readonly message: string;
     readonly line: number | null;
-    readonly traceback: string;
+    readonly stack: string;
   } | null;
   readonly charts: readonly Chart[];
   readonly dataReads: readonly DataRead[];
@@ -64,7 +64,7 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
-export function ExecutePythonContent({
+export function ExecuteJsContent({
   input,
   output,
   errorText,
@@ -83,9 +83,9 @@ export function ExecutePythonContent({
     <div className="space-y-2">
       <div className="overflow-hidden rounded-md bg-muted/50">
         <span className="block px-3 pt-3 font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
-          Python
+          JavaScript
         </span>
-        <CodeBlock className="border-0 bg-transparent text-xs" code={code} language="python" />
+        <CodeBlock className="border-0 bg-transparent text-xs" code={code} language="javascript" />
       </div>
 
       {errorText ? (
@@ -124,9 +124,9 @@ export function ExecutePythonContent({
             {result.error.type}
             {result.error.line === null ? "" : ` (línea ${result.error.line})`}: {result.error.message}
           </p>
-          {result.error.traceback ? (
+          {result.error.stack ? (
             <pre className="overflow-x-auto whitespace-pre-wrap font-mono opacity-80">
-              {result.error.traceback.trimEnd()}
+              {result.error.stack.trimEnd()}
             </pre>
           ) : null}
         </div>
@@ -173,26 +173,70 @@ function ResultTable({ table }: { readonly table: TableResult }) {
 }
 
 /** Charts render outside the collapsible tool card so the user sees them right away. */
-export function ExecutePythonCharts({ output }: { readonly output: unknown }) {
+export function ExecuteJsCharts({ output }: { readonly output: unknown }) {
   const result = asExecutionOutput(output);
-  const charts = result?.charts.filter((chart) => chart.dataBase64) ?? [];
+  const charts = result?.charts ?? [];
   if (charts.length === 0) return null;
 
   return (
     <div className="space-y-3">
       {charts.map((chart) => (
-        <figure className="overflow-hidden rounded-lg border bg-white" key={chart.id}>
-          {/* biome-ignore lint/performance/noImgElement: inline data URL from the tool result */}
-          <img
-            alt={chart.title}
-            className="h-auto w-full"
-            height={chart.height}
-            src={`data:${chart.mediaType};base64,${chart.dataBase64}`}
-            width={chart.width}
-          />
-          <figcaption className="border-t px-3 py-2 text-muted-foreground text-xs">{chart.title}</figcaption>
-        </figure>
+        <VegaChart chart={chart} key={chart.id} />
       ))}
     </div>
+  );
+}
+
+function VegaChart({ chart }: { readonly chart: Chart }) {
+  const container = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    const element = container.current;
+    if (element === null) return;
+    let finalize: (() => void) | undefined;
+    let cancelled = false;
+
+    // Single-view charts stretch to the message width; layouts keep their own sizes.
+    const spec = (
+      typeof chart.spec.width === "number"
+        ? { ...chart.spec, width: "container", autosize: { type: "fit", contains: "padding" } }
+        : chart.spec
+    ) as VisualizationSpec;
+
+    // vega-embed is browser-only and heavy: load it when a chart appears.
+    import("vega-embed")
+      .then(({ default: embed }) =>
+        embed(element, spec, {
+          actions: { export: true, source: false, compiled: false, editor: false },
+          renderer: "svg",
+          formatLocale: ES_CO_FORMAT_LOCALE as unknown as Record<string, unknown>,
+          timeFormatLocale: ES_TIME_FORMAT_LOCALE as unknown as Record<string, unknown>,
+          i18n: { PNG_ACTION: "Descargar PNG", SVG_ACTION: "Descargar SVG" },
+        }),
+      )
+      .then((result) => {
+        if (cancelled) result.finalize();
+        else finalize = result.finalize;
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setFailed(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      cancelled = true;
+      finalize?.();
+    };
+  }, [chart]);
+
+  return (
+    <figure className="overflow-hidden rounded-lg border bg-white p-3 text-black">
+      {failed === null ? (
+        <div className="w-full" ref={container} />
+      ) : (
+        <p className="text-destructive text-xs">No pude dibujar el gráfico: {failed}</p>
+      )}
+      <figcaption className="sr-only">{chart.title}</figcaption>
+    </figure>
   );
 }

@@ -1,11 +1,11 @@
 import { AIRTABLE_API_BASE, type FetchLike } from "#lib/airtable.js";
 
 /**
- * Read-only Airtable access for `execute_python`.
+ * Read-only Airtable access for `execute_js`.
  *
- * Runs in the app runtime, never in the sandbox: the Python client inside the
- * sandbox only sends RPC requests (method + params), and this gateway decides
- * what reaches Airtable. That keeps the token out of generated code and lets
+ * Runs in trusted app code, outside the QuickJS interpreter: the `airtable`
+ * client the model's code sees only sends requests (method + params) over the
+ * host bridge, and this gateway decides what reaches Airtable. That keeps the token out of generated code and lets
  * us enforce, in trusted code, that every request is a GET against the one
  * configured base (and, optionally, an allow-list of tables).
  *
@@ -118,7 +118,7 @@ export interface AirtableGatewayOptions {
   fetchImpl?: FetchLike;
   /** Injectable for tests. */
   sleep?: (ms: number) => Promise<void>;
-  /** Overall deadline (epoch ms) shared with the Python execution. */
+  /** Overall deadline (epoch ms) shared with the code execution. */
   deadline?: number;
 }
 

@@ -14,8 +14,8 @@ import { chartsFromActionResult, sendTelegramCharts } from "#lib/codeact/telegra
  * oversized files at the webhook, before eve fetches them via `getFile`. The
  * second gate lives in `extract_invoice`, which re-checks the real bytes.
  *
- * Charts produced by `execute_python` are sent as photos as soon as the tool
- * finishes, before the agent's text answer.
+ * Charts produced by `execute_js` are rendered to PNG and sent as photos as
+ * soon as the tool finishes, before the agent's text answer.
  */
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME,
@@ -38,7 +38,7 @@ export default telegramChannel({
           botToken: await resolveTelegramBotToken(),
         });
       } catch (error) {
-        console.error("[telegram] could not deliver execute_python charts", error);
+        console.error("[telegram] could not deliver execute_js charts", error);
       }
     },
   },
