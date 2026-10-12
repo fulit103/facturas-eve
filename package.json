@@ -11,6 +11,7 @@
     "deploy": "eve deploy",
     "dev": "next dev",
     "eval": "eve eval",
+    "gen:codeact": "node scripts/generate-codeact-assets.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "next start",
@@ -20,8 +21,10 @@
     "start:eve": "eve start"
   },
   "dependencies": {
+    "@jitl/quickjs-singlefile-cjs-release-sync": "0.32.0",
     "@llamaindex/llama-cloud": "2.16.0",
     "@radix-ui/react-use-controllable-state": "1.2.2",
+    "@resvg/resvg-js": "2.6.2",
     "@shikijs/core": "3.23.0",
     "@shikijs/engine-javascript": "3.23.0",
     "@shikijs/engine-oniguruma": "3.23.0",
@@ -32,6 +35,7 @@
     "@tailwindcss/postcss": "4.3.0",
     "@vercel/connect": "2.2.0",
     "ai": "^7.0.105",
+    "arquero": "8.0.3",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
@@ -40,6 +44,7 @@
     "motion": "12.40.0",
     "nanoid": "5.1.11",
     "next": "16.3.0-preview.6",
+    "quickjs-emscripten-core": "0.32.0",
     "radix-ui": "1.4.3",
     "react": "19.2.6",
     "react-dom": "19.2.6",
@@ -48,12 +53,16 @@
     "tailwind-merge": "3.6.0",
     "tailwindcss": "4.3.0",
     "use-stick-to-bottom": "1.1.4",
+    "vega": "6.4.0",
+    "vega-embed": "7.3.0",
+    "vega-lite": "6.4.3",
     "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "~26.6.1",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
+    "geist": "1.7.2",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
   },

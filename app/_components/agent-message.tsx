@@ -40,6 +40,7 @@ import {
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ExecuteJsCharts, ExecuteJsContent } from "./execute-js-result";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -131,6 +132,29 @@ function AgentMessagePart({
             inputResponse={part.toolMetadata?.eve?.inputResponse}
             onInputResponses={onInputResponses}
           />
+        );
+      }
+
+      if (part.toolName === "execute_js") {
+        return (
+          <>
+            <Tool defaultOpen={part.state === "output-error"}>
+              <ToolHeader
+                state={part.state}
+                title="Análisis de datos"
+                toolName={part.toolName}
+                type="dynamic-tool"
+              />
+              <ToolContent>
+                <ExecuteJsContent
+                  errorText={part.errorText}
+                  input={part.input}
+                  output={part.output}
+                />
+              </ToolContent>
+            </Tool>
+            <ExecuteJsCharts output={part.output} />
+          </>
         );
       }
 
